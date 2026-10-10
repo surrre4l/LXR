@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#11111b">
+  <title>LXR-Crypt 2.0</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div class="brand-mark" aria-hidden="true">LX</div>
+      <div>
+        <p class="eyebrow">BROWSER-LOCAL FILE PROTECTION</p>
+        <h1>LXR-Crypt <span>2.0</span></h1>
+        <p class="subtitle">Encrypt text files into one continuous LXR string.</p>
+      </div>
+    </header>
+
+    <div class="privacy-note">
+      <span class="dot"></span>
+      <div><strong>Files stay in your browser.</strong><br><span>This static app does not upload your files or passwords.</span></div>
+    </div>
+
+    <nav class="tabs" aria-label="Mode">
+      <button class="tab active" id="encryptTab" type="button" aria-selected="true">Encrypt</button>
+      <button class="tab" id="decryptTab" type="button" aria-selected="false">Decrypt</button>
+    </nav>
+
+    <section class="panel" id="encryptPanel">
+      <h2>Protect a file</h2>
+      <p class="muted">Choose a file or paste text. Text formats such as Lua, Luau, TXT, JSON, JS, HTML, CSS, XML, and Markdown are supported.</p>
+      <label class="dropzone" id="dropzone" for="fileInput">
+        <span class="upload-icon" aria-hidden="true">↑</span>
+        <strong id="fileLabel">Choose a file</strong>
+        <span class="muted small">or drop it here · file is processed locally</span>
+        <input id="fileInput" type="file">
+      </label>
+      <div class="or-line"><span>OR PASTE TEXT</span></div>
+      <label class="sr-only" for="plainText">Text to encrypt</label>
+      <textarea id="plainText" rows="6" placeholder="Paste your source code or text here…"></textarea>
+
+      <div class="field">
+        <label for="encryptPassword">Password</label>
+        <div class="password-wrap">
+          <input id="encryptPassword" type="password" autocomplete="new-password" placeholder="Use a strong, unique password">
+          <button class="show-password" type="button" data-toggle="encryptPassword">Show</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="confirmPassword">Confirm password</label>
+        <input id="confirmPassword" type="password" autocomplete="new-password" placeholder="Enter the password again">
+      </div>
+      <button class="primary" id="encryptButton" type="button">Encrypt to LXR <span aria-hidden="true">→</span></button>
+      <p class="hint">Uses PBKDF2-HMAC-SHA-256 and AES-256-GCM through the browser's Web Crypto API.</p>
+    </section>
+
+    <section class="panel hidden" id="decryptPanel">
+      <h2>Recover a file</h2>
+      <p class="muted">Paste an LXR string or import a previously exported .lxr file.</p>
+      <label class="dropzone compact" for="lxrInput">
+        <span class="upload-icon" aria-hidden="true">↑</span>
+        <strong>Import .lxr file</strong>
+        <span class="muted small">or paste the encoded string below</span>
+        <input id="lxrInput" type="file" accept=".lxr,.txt">
+      </label>
+      <label class="sr-only" for="cipherText">LXR encoded string</label>
+      <textarea id="cipherText" rows="6" spellcheck="false" placeholder="Paste the continuous LXR string here…"></textarea>
+      <div class="field">
+        <label for="decryptPassword">Password</label>
+        <div class="password-wrap">
+          <input id="decryptPassword" type="password" autocomplete="current-password" placeholder="Enter the original password">
+          <button class="show-password" type="button" data-toggle="decryptPassword">Show</button>
+        </div>
+      </div>
+      <button class="primary" id="decryptButton" type="button">Decrypt and download <span aria-hidden="true">→</span></button>
+      <p class="hint">Wrong passwords or modified payloads are rejected by AES-GCM authentication.</p>
+    </section>
+
+    <section class="result hidden" id="resultPanel" aria-live="polite">
+      <div class="result-head">
+        <div>
+          <p class="eyebrow">RESULT</p>
+          <h2 id="resultTitle">LXR string created</h2>
+        </div>
+        <span class="status-icon" id="statusIcon" aria-hidden="true">✓</span>
+      </div>
+      <p class="muted" id="resultMessage"></p>
+      <label class="sr-only" for="resultText">Output</label>
+      <textarea id="resultText" rows="7" readonly spellcheck="false"></textarea>
+      <div class="actions">
+        <button class="secondary" id="copyButton" type="button">Copy string</button>
+        <button class="primary" id="downloadButton" type="button">Download .lxr</button>
+      </div>
+    </section>
+
+    <div class="message hidden" id="message" role="alert"></div>
+
+    <footer>
+      <p><strong>LXR-Crypt 2.0</strong> · Open-source browser utility</p>
+      <p>Keep your password safe. There is no password reset or recovery key.</p>
+      <p class="tiny">Encryption protects the contents, not the fact that an LXR file exists. Do not use this tool to conceal malicious code or activity.</p>
+    </footer>
+  </main>
+</body>
+</html>
