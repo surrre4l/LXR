@@ -4,6 +4,14 @@
   const $ = (id) => document.getElementById(id);
   const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz12345";
   const MAGIC = new Uint8Array([0x4c, 0x58, 0x52, 0x32]); // LXR2
+  const ENVELOPE_MAGIC = new Uint8Array([0x4c, 0x58, 0x52, 0x4d]); // LXRM
+  const LEGACY_FORMAT_VERSION = 1;
+  const FORMAT_VERSION = 2;
+  const ENCODING_CLASSIC57 = 1;
+  const ENCODING_WIDE_RESERVED = 2;
+  const CLASSIC_PREFIX = "LXR2C:";
+  const WIDE_PREFIX = "LXR2W:";
+  const WATERMARK = "LXR Encoder created by surrre4L";
   const SALT_LENGTH = 16;
   const IV_LENGTH = 12;
   const PBKDF2_ITERATIONS = 600000;
@@ -130,21 +138,72 @@
     return { bytes, filename: "pasted-text.txt" };
   }
 
-  function makePlainEnvelope(filename, data) {
+  // Legacy envelope retained so existing LXR2/version-1 files remain readable.
+  function makeLegacyPlainEnvelope(filename, data) {
     const nameBytes = encoder.encode(safeBaseName(filename));
     if (nameBytes.length > 65535) throw new Error("Filename is too long.");
     const nameLength = new Uint8Array([nameBytes.length >>> 8, nameBytes.length & 255]);
     return concatBytes(nameLength, nameBytes, data);
   }
 
-  function parsePlainEnvelope(bytes) {
+  function parseLegacyPlainEnvelope(bytes) {
     if (bytes.length < 2) throw new Error("Decrypted payload is incomplete.");
     const nameLength = bytes[0] * 256 + bytes[1];
     if (nameLength < 1 || bytes.length < 2 + nameLength) {
       throw new Error("Decrypted payload has invalid file metadata.");
     }
-    const name = safeBaseName(decoder.decode(bytes.subarray(2, 2 + nameLength)));
-    return { filename: name, bytes: bytes.slice(2 + nameLength) };
+    let decodedName;
+    try {
+      decodedName = decoder.decode(bytes.subarray(2, 2 + nameLength));
+    } catch (_) {
+      throw new Error("Decrypted filename metadata is not valid UTF-8.");
+    }
+    const name = safeBaseName(decodedName);
+    return { filename: name, bytes: bytes.slice(2 + nameLength), watermark: null };
+  }
+
+  // Version-2 envelope stores attribution as encrypted metadata; source bytes stay unchanged.
+  function makeV2PlainEnvelope(filename, data) {
+    const nameBytes = encoder.encode(safeBaseName(filename));
+    const watermarkBytes = encoder.encode(WATERMARK);
+    if (!nameBytes.length || nameBytes.length > 65535) throw new Error("Filename metadata is invalid.");
+    if (watermarkBytes.length > 1024) throw new Error("Watermark metadata is too long.");
+    const lengths = new Uint8Array([
+      nameBytes.length >>> 8, nameBytes.length & 255,
+      watermarkBytes.length >>> 8, watermarkBytes.length & 255
+    ]);
+    return concatBytes(ENVELOPE_MAGIC, new Uint8Array([1]), lengths, nameBytes, watermarkBytes, data);
+  }
+
+  function parseV2PlainEnvelope(bytes) {
+    const fixedLength = ENVELOPE_MAGIC.length + 1 + 4;
+    if (bytes.length < fixedLength) throw new Error("Version-2 decrypted envelope is incomplete.");
+    for (let i = 0; i < ENVELOPE_MAGIC.length; i++) {
+      if (bytes[i] !== ENVELOPE_MAGIC[i]) throw new Error("Invalid version-2 envelope marker.");
+    }
+    if (bytes[4] !== 1) throw new Error("Unsupported metadata schema version.");
+    const nameLength = bytes[5] * 256 + bytes[6];
+    const watermarkLength = bytes[7] * 256 + bytes[8];
+    const metadataEnd = fixedLength + nameLength + watermarkLength;
+    if (nameLength < 1 || nameLength > 65535 || watermarkLength > 1024 || metadataEnd > bytes.length) {
+      throw new Error("Version-2 envelope contains invalid metadata lengths.");
+    }
+    let filename;
+    let watermark;
+    try {
+      filename = decoder.decode(bytes.subarray(fixedLength, fixedLength + nameLength));
+      watermark = decoder.decode(bytes.subarray(fixedLength + nameLength, metadataEnd));
+    } catch (_) {
+      throw new Error("Version-2 metadata is not valid UTF-8.");
+    }
+    if (watermark !== WATERMARK) {
+      throw new Error("The LXR attribution metadata is missing or unsupported.");
+    }
+    return {
+      filename: safeBaseName(filename),
+      watermark,
+      bytes: bytes.slice(metadataEnd)
+    };
   }
 
   async function encryptFile() {
@@ -157,25 +216,31 @@
       if (password !== $("confirmPassword").value) throw new Error("The passwords do not match.");
 
       const { bytes, filename } = await getInputBytes();
-      const envelope = makePlainEnvelope(filename, bytes);
+      const envelope = makeV2PlainEnvelope(filename, bytes);
       const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
       const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
       const key = await deriveKey(password, salt);
 
-      // Header is authenticated as additional data, so format metadata cannot be altered unnoticed.
-      const header = concatBytes(MAGIC, new Uint8Array([1]), salt, iv);
+      // Header fields are authenticated as AES-GCM additional authenticated data.
+      // Encoding ID 2 is reserved for LXR-Wide and is not enabled in this build yet.
+      const header = concatBytes(
+        MAGIC,
+        new Uint8Array([FORMAT_VERSION, ENCODING_CLASSIC57, 0]),
+        salt,
+        iv
+      );
       const encrypted = new Uint8Array(await crypto.subtle.encrypt(
         { name: "AES-GCM", iv, additionalData: header, tagLength: 128 },
         key,
         envelope
       ));
       const payload = concatBytes(header, encrypted);
-      outputString = encodeLXR(payload);
+      outputString = CLASSIC_PREFIX + encodeLXR(payload);
       outputFilename = safeBaseName(filename) + ".lxr";
 
       $("resultTitle").textContent = "LXR string created";
       $("resultMessage").textContent =
-        `${bytes.length.toLocaleString()} source bytes encrypted. Output is ${outputString.length.toLocaleString()} characters.`;
+        `${bytes.length.toLocaleString()} source bytes encrypted. Format LXR2C · classic encoding · encrypted attribution metadata included. Output is ${outputString.length.toLocaleString()} characters.`;
       $("resultText").value = outputString;
       $("downloadButton").textContent = "Download .lxr";
       $("copyButton").textContent = "Copy string";
@@ -201,24 +266,64 @@
       let encoded = $("cipherText").value.trim();
       if (!encoded && $("lxrInput").files[0]) {
         const file = $("lxrInput").files[0];
-        if (file.size > MAX_INPUT_BYTES * 2 + 1000) throw new Error("The LXR file exceeds the size limit.");
+        if (file.size > MAX_INPUT_BYTES * 2 + 8192) throw new Error("The LXR file exceeds the size limit.");
         encoded = await file.text();
       }
-      const payload = decodeLXR(encoded);
-      const minimum = MAGIC.length + 1 + SALT_LENGTH + IV_LENGTH + 16;
-      if (payload.length < minimum) throw new Error("This is too short to be a valid LXR-Crypt 2.0 payload.");
+      encoded = encoded.trim();
+      if (!encoded) throw new Error("Paste an LXR string or import an .lxr file first.");
+      if (encoded.length > MAX_INPUT_BYTES * 2 + 8192) throw new Error("The LXR string exceeds the size limit.");
 
-      let offset = 0;
-      for (const b of MAGIC) {
-        if (payload[offset++] !== b) throw new Error("Unrecognized format. This is not an LXR-Crypt 2.0 payload.");
+      let payload;
+      let expectedFormat = "legacy";
+      if (encoded.startsWith(WIDE_PREFIX)) {
+        throw new Error("This file declares LXR-Wide encoding, which is reserved for a future development build and is not enabled yet.");
+      } else if (encoded.startsWith(CLASSIC_PREFIX)) {
+        expectedFormat = "v2";
+        payload = decodeLXR(encoded.slice(CLASSIC_PREFIX.length));
+      } else {
+        // Unprefixed strings are treated as the original 2.0 format for backward compatibility.
+        payload = decodeLXR(encoded);
       }
-      const version = payload[offset++];
-      if (version !== 1) throw new Error("Unsupported LXR payload version.");
 
-      const salt = payload.slice(offset, offset + SALT_LENGTH); offset += SALT_LENGTH;
-      const iv = payload.slice(offset, offset + IV_LENGTH); offset += IV_LENGTH;
-      const header = payload.slice(0, offset);
-      const ciphertext = payload.slice(offset);
+      if (payload.length > MAX_INPUT_BYTES + 4096) throw new Error("Decoded LXR payload exceeds the supported size limit.");
+      const legacyMinimum = MAGIC.length + 1 + SALT_LENGTH + IV_LENGTH + 16;
+      const v2Minimum = MAGIC.length + 3 + SALT_LENGTH + IV_LENGTH + 16;
+      if (payload.length < (expectedFormat === "v2" ? v2Minimum : legacyMinimum)) {
+        throw new Error("This is too short to be a valid LXR-Crypt 2.0 payload.");
+      }
+
+      for (let i = 0; i < MAGIC.length; i++) {
+        if (payload[i] !== MAGIC[i]) throw new Error("Unrecognized format. This is not an LXR-Crypt payload.");
+      }
+      const version = payload[MAGIC.length];
+      let saltStart;
+      let headerLength;
+      if (expectedFormat === "legacy") {
+        if (version !== LEGACY_FORMAT_VERSION) {
+          if (version === FORMAT_VERSION) throw new Error("This version-2 payload is missing its LXR2C format prefix.");
+          throw new Error("Unsupported legacy LXR payload version.");
+        }
+        saltStart = MAGIC.length + 1;
+        headerLength = saltStart + SALT_LENGTH + IV_LENGTH;
+      } else {
+        if (version !== FORMAT_VERSION) throw new Error("The LXR2C prefix does not match the binary format version.");
+        const encodingId = payload[MAGIC.length + 1];
+        const flags = payload[MAGIC.length + 2];
+        if (encodingId === ENCODING_WIDE_RESERVED) {
+          throw new Error("The payload declares LXR-Wide encoding, which is not enabled in this build.");
+        }
+        if (encodingId !== ENCODING_CLASSIC57) throw new Error("Unsupported LXR encoding identifier.");
+        if (flags !== 0) throw new Error("Unsupported LXR header flags.");
+        saltStart = MAGIC.length + 3;
+        headerLength = saltStart + SALT_LENGTH + IV_LENGTH;
+      }
+
+      const salt = payload.slice(saltStart, saltStart + SALT_LENGTH);
+      const iv = payload.slice(saltStart + SALT_LENGTH, headerLength);
+      if (salt.length !== SALT_LENGTH || iv.length !== IV_LENGTH) throw new Error("The LXR header is truncated.");
+      const header = payload.slice(0, headerLength);
+      const ciphertext = payload.slice(headerLength);
+      if (ciphertext.length < 16) throw new Error("The encrypted payload is missing its authentication tag.");
       const key = await deriveKey(password, salt);
 
       let plaintext;
@@ -232,7 +337,15 @@
         throw new Error("Decryption failed. The password may be incorrect, or the LXR data may have been changed.");
       }
 
-      const recovered = parsePlainEnvelope(plaintext);
+      let recovered;
+      try {
+        recovered = expectedFormat === "v2"
+          ? parseV2PlainEnvelope(plaintext)
+          : parseLegacyPlainEnvelope(plaintext);
+      } catch (error) {
+        throw new Error(error.message || "Decrypted file metadata is invalid.");
+      }
+
       const blob = new Blob([recovered.bytes], { type: "application/octet-stream" });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -244,7 +357,7 @@
       setTimeout(() => URL.revokeObjectURL(url), 30000);
 
       $("resultTitle").textContent = "File recovered";
-      $("resultMessage").textContent = `${recovered.bytes.length.toLocaleString()} bytes authenticated and downloaded as ${recovered.filename}.`;
+      $("resultMessage").textContent = `${recovered.bytes.length.toLocaleString()} bytes authenticated and downloaded as ${recovered.filename}. ${expectedFormat === "v2" ? "LXR2C format and encrypted attribution metadata verified." : "Legacy LXR2 format authenticated."}`;
       $("resultText").value = "";
       $("copyButton").classList.add("hidden");
       $("downloadButton").classList.add("hidden");
@@ -289,12 +402,16 @@
   $("lxrInput").addEventListener("change", async (event) => {
     const file = event.target.files[0];
     if (!file) return;
-    if (file.size > MAX_INPUT_BYTES * 2 + 1000) {
+    if (file.size > MAX_INPUT_BYTES * 2 + 8192) {
       showMessage("The LXR file exceeds the size limit.");
       return;
     }
-    $("cipherText").value = (await file.text()).trim();
-    clearMessage();
+    try {
+      $("cipherText").value = (await file.text()).trim();
+      clearMessage();
+    } catch (_) {
+      showMessage("Could not read the selected LXR file.");
+    }
   });
 
   for (const zone of [ $("dropzone") ]) {

@@ -16,7 +16,7 @@
       <div>
         <p class="eyebrow">BROWSER-LOCAL FILE PROTECTION</p>
         <h1>LXR-Crypt <span>2.0</span></h1>
-        <p class="subtitle">Encrypt text files into one continuous LXR string.</p>
+        <p class="subtitle">Encrypt files into a continuous, versioned LXR string.</p>
       </div>
     </header>
 
@@ -55,7 +55,7 @@
         <input id="confirmPassword" type="password" autocomplete="new-password" placeholder="Enter the password again">
       </div>
       <button class="primary" id="encryptButton" type="button">Encrypt to LXR <span aria-hidden="true">→</span></button>
-      <p class="hint">Uses PBKDF2-HMAC-SHA-256 and AES-256-GCM through the browser's Web Crypto API.</p>
+      <p class="hint">Uses PBKDF2-HMAC-SHA-256 and AES-256-GCM. New files use the LXR2C format; older LXR2 files remain supported.</p>
     </section>
 
     <section class="panel hidden" id="decryptPanel">
@@ -77,7 +77,7 @@
         </div>
       </div>
       <button class="primary" id="decryptButton" type="button">Decrypt and download <span aria-hidden="true">→</span></button>
-      <p class="hint">Wrong passwords or modified payloads are rejected by AES-GCM authentication.</p>
+      <p class="hint">Wrong passwords and modified encrypted payloads are rejected by AES-GCM authentication. LXR-Wide is reserved for a future build.</p>
     </section>
 
     <section class="result hidden" id="resultPanel" aria-live="polite">
@@ -102,7 +102,7 @@
     <footer>
       <p><strong>LXR-Crypt 2.0</strong> · Open-source browser utility</p>
       <p>Keep your password safe. There is no password reset or recovery key.</p>
-      <p class="tiny">Encryption protects the contents, not the fact that an LXR file exists. Do not use this tool to conceal malicious code or activity.</p>
+      <p class="tiny">New files use a versioned LXR2C header and encrypted attribution metadata. Older unprefixed LXR2 files remain supported. Encryption protects the contents, not the fact that an LXR file exists. Do not use this tool to conceal malicious code or activity.</p>
     </footer>
   </main>
 </body>
